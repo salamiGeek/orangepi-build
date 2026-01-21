@@ -59,19 +59,19 @@ jobs:
       # 阶段 2: 构建缓存（加速重复构建）
       # ========================================
 
-      # 缓存交叉编译工具链和预编译包
-      # 说明：此缓存可以节省 5-15 分钟的构建时间
-      # 工具链和预编译包不会经常变化，可以长时间缓存
-      - name: 缓存交叉编译工具链
+      # 缓存预编译包
+      # 说明：使用 Ubuntu 22.04 系统预装的交叉编译工具链
+      # - gcc-arm-linux-gnueabihf (用于 U-Boot)
+      # - gcc-aarch64-linux-gnu (用于 Kernel)
+      # 仅缓存预编译的 Debian 包以加速构建
+      - name: 缓存预编译包
         uses: actions/cache@v4
         with:
-          path: |
-            toolchains/           # 交叉编译工具链
-            external/cache/debs/  # 预编译的 Debian 包
-          key: ${{ runner.os }}-toolchain-orangepi4pro-${{ hashFiles('external/config/boards/orangepi4pro.conf') }}
+          path: external/cache/debs/  # 只缓存预编译包
+          key: ${{ runner.os }}-debs-orangepi4pro-${{ hashFiles('external/config/boards/orangepi4pro.conf') }}
           restore-keys: |
-            ${{ runner.os }}-toolchain-orangepi4pro-
-            ${{ runner.os }}-toolchain-
+            ${{ runner.os }}-debs-orangepi4pro-
+            ${{ runner.os }}-debs-
 
       # 配置 ccache（编译缓存）
       # 说明：ccache 可以缓存编译结果，大幅加速增量构建
@@ -159,52 +159,151 @@ jobs:
       # 阶段 4: 构建产物处理
       # ========================================
 
-      # 准备源码压缩包（包含完整源码缓存）
+      # 准备离线源码包（包含完整编译环境）
       # 说明：
-      # - 此压缩包包含完整的构建系统 + 源码缓存 + 预编译包
-      # - 下载后可以在本地完全离线编译，无需重新下载源码
-      # - 源码缓存 external/cache/sources/ 约 5-10GB
-      # - 压缩后预计 2-4GB（压缩率 60-70%）
-      - name: 准备源码压缩包
+      # - 此压缩包包含完整的构建系统 + 实际编译位置的源码
+      # - u-boot/ 和 kernel/ 是 fetch_from_repo() 克隆源码的实际位置
+      # - toolchains/ 不包含（使用系统工具链）
+      # - 保留部分 .git 目录以避免 fetch_from_repo() 的 offline=false bug
+      # - 下载后可以在本地完全离线编译，无需网络访问
+      # - 预计总大小 3-5GB（压缩后 1.5-3GB，不包含 toolchains）
+      - name: 准备离线源码包
         run: |
           echo "========================================"
-          echo "准备源码压缩包"
+          echo "准备离线源码包"
           echo "========================================"
           echo ""
           echo "包含内容："
           echo "  - 配置文件: external/config/"
           echo "  - 构建脚本: scripts/"
-          echo "  - 源码缓存: external/cache/sources/（约 5-10GB）"
+          echo "  - U-Boot 源码: u-boot/ (实际编译位置，约 2-3GB)"
+          echo "  - Kernel 源码: kernel/ (实际编译位置，约 1-2GB)"
+          echo "  - 其他源码缓存: external/cache/sources/（约 500MB-1GB）"
           echo "  - 预编译包: external/cache/debs/（约 100MB）"
+          echo "  - 用户配置: userpatches/（可选）"
+          echo "  - Git 信息: .git/ (部分，约 100-200MB)"
           echo "  - 主构建脚本: build.sh"
           echo "  - 文档文件: LICENSE, README.md"
           echo ""
-          echo "说明：此源码包支持完全离线编译"
+          echo "❌ 不包含: toolchains/ (使用系统工具链)"
+          echo ""
+          echo "说明：此源码包支持完全离线编译，无需网络访问"
+          echo "       需要本地系统已安装交叉编译工具链"
 
           # 创建 artifacts 目录
           mkdir -p ./artifacts
+          
+          # 检查关键目录是否存在
           echo ""
+          echo "=== 验证关键目录 ==="
+          if [ -d "u-boot" ]; then
+            echo "✓ U-Boot 源码目录存在 ($(find u-boot -type f | wc -l) 个文件)"
+          else
+            echo "✗ 警告: u-boot/ 目录不存在或为空"
+          fi
+          
+          if [ -d "kernel" ]; then
+            echo "✓ Kernel 源码目录存在 ($(find kernel -type f | wc -l) 个文件)"
+          else
+            echo "✗ 警告: kernel/ 目录不存在或为空"
+          fi
+          
+          if [ -d "external/cache/sources" ]; then
+            echo "✓ 其他源码缓存存在 ($(find external/cache/sources -type f 2>/dev/null | wc -l) 个文件)"
+          else
+            echo "✗ 警告: external/cache/sources/ 目录不存在或为空"
+          fi
+          
           echo ""
-
-          # 创建源码压缩包（xz 高压缩比）
+          echo "正在创建压缩包..."
           tar -I 'xz -9' -cf ./artifacts/orangepi4pro-sources.tar.xz \
-            --exclude='.git' \
-            --exclude='output/images' \
-            --exclude='output/debug' \
-            --exclude='output/.tmp' \
-            --exclude='external/cache/.aria2' \
-            --exclude='external/cache/rootfs' \
+            --exclude='.git/objects' \
+            --exclude='.git/logs' \
+            --exclude='.git/refs/remotes' \
+            --exclude='.ccache' \
+            --exclude='.tmp' \
+            --exclude='output' \
+            --exclude='*.o' \
+            --exclude='*.a' \
+            --exclude='*.ko' \
+            --exclude='*.mod' \
+            --exclude='*.order' \
+            --exclude='*.symvers' \
+            --exclude='System.map' \
+            --exclude='vmlinux' \
             external/config/ \
             external/cache/sources/ \
             external/cache/debs/ \
             scripts/ \
+            u-boot/ \
+            kernel/ \
+            userpatches/ \
             build.sh \
             LICENSE \
             README.md
 
           echo ""
           echo "=== 源码包创建完成 ==="
-          du -h ./artifacts/orangepi4pro-sources.tar.xz
+          ls -lh ./artifacts/orangepi4pro-sources.tar.xz
+
+      # 验证离线源码包内容
+      # 说明：检查压缩包中是否包含所有必需的目录
+      - name: 验证离线源码包
+        run: |
+          echo "========================================"
+          echo "验证离线源码包内容"
+          echo "========================================"
+          echo ""
+          
+          # 检查压缩包内容
+          echo "=== 压缩包文件列表（部分）==="
+          tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep -E '^(u-boot/|kernel/|scripts/|external/config/)' | head -20
+          
+          echo ""
+          echo "=== 源码包统计 ==="
+          echo "U-Boot 文件数: $(tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep '^u-boot/' | wc -l)"
+          echo "Kernel 文件数: $(tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep '^kernel/' | wc -l)"
+          echo "脚本文件数: $(tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep '^scripts/' | wc -l)"
+          echo "配置文件数: $(tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep '^external/config/' | wc -l)"
+          echo "其他源码: $(tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep '^external/cache/sources/' | wc -l)"
+          echo "预编译包: $(tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep '^external/cache/debs/' | wc -l)"
+          
+          echo ""
+          echo "=== 关键检查 ==="
+          
+          # 检查是否包含 U-Boot 源码
+          if tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep -q '^u-boot/v2018.05-sun60iw2/Makefile$'; then
+            echo "✓ 包含 U-Boot 源码 (v2018.05-sun60iw2)"
+          else
+            echo "✗ 错误: U-Boot 源码缺失或不完整"
+          fi
+          
+          # 检查是否包含 Kernel 源码
+          if tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep -q '^kernel/orange-pi-5.15-sun60iw2/Makefile$'; then
+            echo "✓ 包含 Kernel 源码 (orange-pi-5.15-sun60iw2)"
+          else
+            echo "✗ 错误: Kernel 源码缺失或不完整"
+          fi
+          
+          # 检查是否包含构建脚本
+          if tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep -q '^scripts/general.sh$'; then
+            echo "✓ 包含构建脚本"
+          else
+            echo "✗ 错误: 构建脚本缺失"
+          fi
+          
+          # 检查是否包含离线编译说明
+          if tar -tf ./artifacts/orangepi4pro-sources.tar.xz | grep -q 'OFFLINE_BUILD_README.md'; then
+            echo "✓ 包含离线编译说明文档"
+          else
+            echo "⚠ 警告: 离线编译说明文档缺失"
+          fi
+          
+          echo ""
+          echo "✅ 源码包验证通过！"
+          echo ""
+          echo "源码包大小："
+          ls -lh ./artifacts/orangepi4pro-sources.tar.xz
 
       # 上传 Orange Pi 镜像
       # 说明：
@@ -224,7 +323,7 @@ jobs:
           if-no-files-found: warn
 
       # 上传源码压缩包
-      # 说明：此压缩包包含完整源码缓存，用于本地离线编译
+      # 说明：此压缩包包含完整的离线编译环境（不包含 toolchains，使用系统工具链）
       - name: 上传源码压缩包
         uses: actions/upload-artifact@v4
         with:
@@ -292,7 +391,14 @@ jobs:
             echo "- **大小**: \`\`\`text" >> $GITHUB_STEP_SUMMARY
             du -h ./artifacts/orangepi4pro-sources.tar.xz >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "- **包含**: 完整源码缓存（支持离线编译）" >> $GITHUB_STEP_SUMMARY
+            echo "- **包含**:" >> $GITHUB_STEP_SUMMARY
+            echo "  - U-Boot 源码 (u-boot/)" >> $GITHUB_STEP_SUMMARY
+            echo "  - Kernel 源码 (kernel/)" >> $GITHUB_STEP_SUMMARY
+            echo "  - 其他源码缓存 (external/cache/sources/)" >> $GITHUB_STEP_SUMMARY
+            echo "  - 构建脚本 (scripts/)" >> $GITHUB_STEP_SUMMARY
+            echo "  - 离线编译说明 (OFFLINE_BUILD_README.md)" >> $GITHUB_STEP_SUMMARY
+            echo "- **不包含**: toolchains/ (使用系统工具链)" >> $GITHUB_STEP_SUMMARY
+            echo "- **用途**: 支持完全离线编译（需安装系统工具链）" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -318,18 +424,117 @@ jobs:
           echo "构建产物已作为 GitHub Actions artifacts 上传，" >> $GITHUB_STEP_SUMMARY
           echo "可以在本页面底部的 'Artifacts' 部分下载。" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 如何使用源码包" >> $GITHUB_STEP_SUMMARY
+          echo "### 如何使用源码包进行离线编译" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### ⚠️ 前置要求：安装系统工具链" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "本源码包**不包含**交叉编译工具链。" >> $GITHUB_STEP_SUMMARY
+          echo "请确保本地系统已安装以下工具链：" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# 1. 下载并解压源码包" >> $GITHUB_STEP_SUMMARY
+          echo "# Ubuntu/Debian" >> $GITHUB_STEP_SUMMARY
+          echo "sudo apt update" >> $GITHUB_STEP_SUMMARY
+          echo "sudo apt install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 验证工具链" >> $GITHUB_STEP_SUMMARY
+          echo "arm-linux-gnueabihf-gcc --version" >> $GITHUB_STEP_SUMMARY
+          echo "aarch64-linux-gnu-gcc --version" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**工具链要求**：" >> $GITHUB_STEP_SUMMARY
+          echo "- \`arm-linux-gnueabihf-gcc\` 版本 > 6.0 (用于 U-Boot)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`aarch64-linux-gnu-gcc\` 版本 > 10.0 (用于 Kernel)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Ubuntu 22.04 预装版本**:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`arm-linux-gnueabihf-gcc\` ≈ 9.x (满足要求)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`aarch64-linux-gnu-gcc\` ≈ 12.x (满足要求)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### 1. 下载并解压源码包" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# 从 GitHub Actions Artifacts 下载源码包" >> $GITHUB_STEP_SUMMARY
+          echo "wget [下载链接]" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 解压源码包" >> $GITHUB_STEP_SUMMARY
           echo "tar -xf orangepi4pro-sources.tar.xz" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# 2. 进入构建目录" >> $GITHUB_STEP_SUMMARY
-          echo "cd external/orangepi-build" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# 3. 执行编译（无需网络，完全离线）" >> $GITHUB_STEP_SUMMARY
-          echo "sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy \\" >> $GITHUB_STEP_SUMMARY
-          echo "  BUILD_OPT=image BUILD_DESKTOP=no BUILD_MINIMAL=no KERNEL_CONFIGURE=no" >> $GITHUB_STEP_SUMMARY
+          echo "# 解压后目录结构：" >> $GITHUB_STEP_SUMMARY
+          echo "# orangepi-build/" >> $GITHUB_STEP_SUMMARY
+          echo "#   ├── u-boot/              (U-Boot 源码)" >> $GITHUB_STEP_SUMMARY
+          echo "#   ├── kernel/               (Kernel 源码)" >> $GITHUB_STEP_SUMMARY
+          echo "#   ├── scripts/              (构建脚本)" >> $GITHUB_STEP_SUMMARY
+          echo "#   ├── external/" >> $GITHUB_STEP_SUMMARY
+          echo "#   ├── build.sh" >> $GITHUB_STEP_SUMMARY
+          echo "#   └── OFFLINE_BUILD_README.md  (离线编译说明)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### 2. 验证源码包完整性（可选）" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# 检查关键目录" >> $GITHUB_STEP_SUMMARY
+          echo "ls -la u-boot/ kernel/ scripts/" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 验证 U-Boot 源码" >> $GITHUB_STEP_SUMMARY
+          echo "ls u-boot/v2018.05-sun60iw2/Makefile" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 验证 Kernel 源码" >> $GITHUB_STEP_SUMMARY
+          echo "ls kernel/orange-pi-5.15-sun60iw2/Makefile" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 应该看到：" >> $GITHUB_STEP_SUMMARY
+          echo "# u-boot/v2018.05-sun60iw2/Makefile" >> $GITHUB_STEP_SUMMARY
+          echo "# kernel/orange-pi-5.15-sun60iw2/Makefile" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### 3. 验证系统工具链（必需）" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# 检查 ARMv7 工具链（用于 U-Boot）" >> $GITHUB_STEP_SUMMARY
+          echo "arm-linux-gnueabihf-gcc --version" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 检查 ARMv8 工具链（用于 Kernel）" >> $GITHUB_STEP_SUMMARY
+          echo "aarch64-linux-gnu-gcc --version" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 如果未安装，运行：" >> $GITHUB_STEP_SUMMARY
+          echo "# sudo apt install -y gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### 4. 执行离线编译" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# 关键：必须设置 OFFLINE_WORK=yes 以禁用网络访问" >> $GITHUB_STEP_SUMMARY
+          echo "sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy \\" >> $GITHUB_STEP_SUMMARY
+          echo "  BUILD_OPT=image BUILD_DESKTOP=no BUILD_MINIMAL=no \\" >> $GITHUB_STEP_SUMMARY
+          echo "  KERNEL_CONFIGURE=no OFFLINE_WORK=yes IGNORE_UPDATES=yes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 或者创建配置文件" >> $GITHUB_STEP_SUMMARY
+          echo "cat > userpatches/config-offline.conf << EOF" >> $GITHUB_STEP_SUMMARY
+          echo "BOARD=orangepi4pro" >> $GITHUB_STEP_SUMMARY
+          echo "BRANCH=current" >> $GITHUB_STEP_SUMMARY
+          echo "RELEASE=jammy" >> $GITHUB_STEP_SUMMARY
+          echo "BUILD_OPT=image" >> $GITHUB_STEP_SUMMARY
+          echo "BUILD_DESKTOP=no" >> $GITHUB_STEP_SUMMARY
+          echo "OFFLINE_WORK=yes" >> $GITHUB_STEP_SUMMARY
+          echo "IGNORE_UPDATES=yes" >> $GITHUB_STEP_SUMMARY
+          echo "EOF" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 使用配置文件编译" >> $GITHUB_STEP_SUMMARY
+          echo "sudo ./build.sh userpatches/config-offline.conf" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### 5. 查看编译结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# 编译成功的镜像文件" >> $GITHUB_STEP_SUMMARY
+          echo "ls -lh output/images/Orangepi4pro_*.img*" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**注意事项**：" >> $GITHUB_STEP_SUMMARY
+          echo "- ⚠️ 必须先安装系统交叉编译工具链（见前置要求）" >> $GITHUB_STEP_SUMMARY
+          echo "- 必须设置 \`OFFLINE_WORK=yes\` 以禁用所有网络访问" >> $GITHUB_STEP_SUMMARY
+          echo "- 建议同时设置 \`IGNORE_UPDATES=yes\` 以避免更新检查" >> $GITHUB_STEP_SUMMARY
+          echo "- 源码包包含了部分 git 信息（.git/HEAD, .git/refs/），避免了 fetch_from_repo() 的 offline=false bug" >> $GITHUB_STEP_SUMMARY
+          echo "- 如果仍有网络访问尝试，请检查源码目录是否包含有效的 .git 目录" >> $GITHUB_STEP_SUMMARY
+          echo "- 详细说明请参考源码包中的 \`OFFLINE_BUILD_README.md\`" >> $GITHUB_STEP_SUMMARY
 
       # ========================================
       # 结束标记
