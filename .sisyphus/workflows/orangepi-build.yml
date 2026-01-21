@@ -180,6 +180,10 @@ jobs:
           echo "  - 文档文件: LICENSE, README.md"
           echo ""
           echo "说明：此源码包支持完全离线编译"
+
+          # 创建 artifacts 目录
+          mkdir -p ./artifacts
+          echo ""
           echo ""
 
           # 创建源码压缩包（xz 高压缩比）
