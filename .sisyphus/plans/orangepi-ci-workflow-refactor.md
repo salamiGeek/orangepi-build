@@ -22,7 +22,7 @@ sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy \
 ### Orange Pi Build 系统特点
 1. **需要 sudo 权限**：build.sh 脚本必须以 root 或 sudo 运行
 2. **自动依赖安装**：build.sh 会通过 `prepare_host_basic()` 自动安装依赖
-3. **构建产物位置**：`output/images/*.img*` (最终镜像), `output/debs/` (.deb 包)
+3. **构建产物位置**：`output/images/{version}/*.img*` (最终镜像位于版本子目录), `output/debs/` (.deb 包)
 4. **源码缓存位置**：`external/cache/sources/` (约5-10GB)
 5. **构建时间**：首次构建 2-4 小时，增量编译 30-60 分钟
 
@@ -228,13 +228,15 @@ jobs:
 #### 4.2 上传镜像文件
 ```yaml
       # 上传构建镜像
+      # 注意：镜像文件位于版本子目录中（如 output/images/Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147/）
+      # 需要使用递归通配符 **/ 来匹配子目录中的文件
       - name: 上传 Orange Pi 镜像
         uses: actions/upload-artifact@v4
         with:
           name: orangepi4pro-image-${{ github.sha }}
           path: |
-            output/images/*.img*
-            output/images/*.sha
+            output/images/**/*.img*
+            output/images/**/*.sha
           retention-days: 30
           compression-level: 0  # 文件已压缩，跳过再次压缩
           if-no-files-found: warn
@@ -326,6 +328,14 @@ jobs:
 - ✅ 使用 `xz -9` 高压缩比（压缩率 60-70%）
 - ✅ 如果源码包仍超过 5GB，考虑使用外部存储（S3、云盘）
 - ✅ 将大文件分割为多个小 artifacts（镜像、源码、日志）
+
+### 5. 路径匹配问题
+**问题**：Orange Pi 构建系统将镜像文件存储在版本子目录中（如 `output/images/Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147/`），但 GitHub Actions 的默认通配符只匹配直接子目录
+
+**解决方案**：
+- ✅ 使用递归通配符 `**/*.img*` 和 `**/*.sha` 匹配任意深度的子目录
+- ✅ 在注释中说明镜像文件的实际存储位置
+- ✅ 测试路径匹配模式确保正确捕获所有文件
 
 ### 5. 构建失败处理
 **问题**：构建可能因各种原因失败

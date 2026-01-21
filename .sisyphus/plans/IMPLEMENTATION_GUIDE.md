@@ -88,7 +88,7 @@ git push origin next
 
 #### 可用产物：
 1. **orangepi4pro-image-{sha}.zip**
-   - 包含: `output/images/*.img*` 和 `output/images/*.sha`
+   - 包含: `output/images/**/*.img*` 和 `output/images/**/*.sha`（递归匹配子目录）
    - 用途: 直接烧录到 SD 卡
    
 2. **orangepi4pro-sources-{sha}.zip**
@@ -178,9 +178,10 @@ sudo ./build.sh BOARD=orangepi4pro BRANCH=current RELEASE=jammy \
 ### 构建产物
 ```bash
 output/images/
-├── OrangePi4Pro_1.0.4_Ubuntu_jammy_current_linux6.1.50.img
-├── OrangePi4Pro_1.0.4_Ubuntu_jammy_current_linux6.1.50.img.sha
-└── OrangePi4Pro_1.0.4_Ubuntu_jammy_current_linux6.1.50.img.xz
+└── Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147/  # 版本子目录
+    ├── Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147.img
+    ├── Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147.img.sha
+    └── Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147.img.xz
 
 artifacts/
 └── orangepi4pro-sources.tar.xz  # 约 2-4GB
@@ -205,9 +206,9 @@ artifacts/
 | 触发方式 | push |
 
 ## 构建产物
--rw-r--r-- 1 runner docker 1.2G Jan 21 10:00 OrangePi4Pro_1.0.4_Ubuntu_jammy_current_linux6.1.50.img
--rw-r--r-- 1 runner docker   65 Jan 21 10:00 OrangePi4Pro_1.0.4_Ubuntu_jammy_current_linux6.1.50.img.sha
--rw-r--r-- 1 runner docker 420M Jan 21 10:00 OrangePi4Pro_1.0.4_Ubuntu_jammy_current_linux6.1.50.img.xz
+-rw-r--r-- 1 runner docker 1.2G Jan 21 10:00 Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147.img
+-rw-r--r-- 1 runner docker   65 Jan 21 10:00 Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147.img.sha
+-rw-r--r-- 1 runner docker 420M Jan 21 10:00 Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147.img.xz
 
 ## 源码包
 - **文件名**: `orangepi4pro-sources.tar.xz`

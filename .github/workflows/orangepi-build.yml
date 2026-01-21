@@ -209,6 +209,7 @@ jobs:
       # 上传 Orange Pi 镜像
       # 说明：
       # - 镜像文件通常已经压缩（.img.gz, .img.xz）
+      # - 镜像文件位于版本子目录中（如 output/images/Orangepi4pro_1.0.4_ubuntu_jammy_server_linux5.15.147/）
       # - 设置 compression-level: 0 跳过再次压缩，节省时间
       # - 保留 30 天，便于回溯和测试
       - name: 上传 Orange Pi 镜像
@@ -216,8 +217,8 @@ jobs:
         with:
           name: orangepi4pro-image-${{ github.sha }}
           path: |
-            output/images/*.img*
-            output/images/*.sha
+            output/images/**/*.img*
+            output/images/**/*.sha
           retention-days: 30
           compression-level: 0  # 文件已压缩，跳过再次压缩
           if-no-files-found: warn
